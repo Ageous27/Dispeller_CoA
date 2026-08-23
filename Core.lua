@@ -7,6 +7,22 @@ local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffDispeller_CoA:|r " .. msg)
 end
 
+local function CopyTable(src)
+    if type(src) ~= "table" then
+        return src
+    end
+    local dst = {}
+    local k, v
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            dst[k] = CopyTable(v)
+        else
+            dst[k] = v
+        end
+    end
+    return dst
+end
+
 local function MergeDefaults(dst, src)
     local k, v
     for k, v in pairs(src) do
@@ -23,35 +39,83 @@ local function MergeDefaults(dst, src)
     end
 end
 
-local function CharKey()
-    return (GetRealmName() or "Realm") .. "-" .. (UnitName("player") or "Player")
+function DispellerCoA.ServerName()
+    local realm = GetRealmName() or "Realm"
+    realm = string.gsub(realm, "%s*%-%s*Conquest of Azeroth", "")
+    realm = string.gsub(realm, "Conquest of Azeroth", "")
+    realm = string.gsub(realm, "^%s+", "")
+    realm = string.gsub(realm, "%s+$", "")
+    if realm == "" then
+        realm = "Realm"
+    end
+    return realm
 end
 
-function DispellerCoA.InitDB()
-    DispellerCoADB = DispellerCoADB or {}
-    DispellerCoADB.char = DispellerCoADB.char or {}
-    local key = CharKey()
-    if not DispellerCoADB.char[key] then
-        DispellerCoADB.char[key] = DispellerCoA.DefaultDB()
-    else
-        MergeDefaults(DispellerCoADB.char[key], DispellerCoA.DefaultDB())
+function DispellerCoA.DefaultProfileName()
+    return DispellerCoA.ServerName() .. " - " .. (UnitName("player") or "Player")
+end
+
+function DispellerCoA.CleanProfileLabel(text)
+    if type(text) ~= "string" then
+        return text
     end
-    DispellerCoA.db = DispellerCoADB.char[key]
-    DispellerCoA.charKey = key
-    local db = DispellerCoA.db
-    if db.typeEnabled.Bleed == nil then
-        db.typeEnabled.Bleed = true
-    end
-    local hasBleed = false
-    local i
-    for i = 1, #db.typeOrder do
-        if db.typeOrder[i] == "Bleed" then
-            hasBleed = true
-            break
+    text = string.gsub(text, "%s*%-%s*Conquest of Azeroth", "")
+    text = string.gsub(text, "Conquest of Azeroth%s*%-%s*", "")
+    text = string.gsub(text, "Conquest of Azeroth", "")
+    text = string.gsub(text, "^%s+", "")
+    text = string.gsub(text, "%s+$", "")
+    text = string.gsub(text, "%s+", " ")
+    local server, character = string.match(text, "^(.-)%-([^%-]+)$")
+    if server and character then
+        server = string.gsub(server, "^%s+", "")
+        server = string.gsub(server, "%s+$", "")
+        character = string.gsub(character, "^%s+", "")
+        character = string.gsub(character, "%s+$", "")
+        if server ~= "" and character ~= "" then
+            text = server .. " - " .. character
         end
     end
-    if not hasBleed then
-        db.typeOrder[#db.typeOrder + 1] = "Bleed"
+    return text
+end
+
+function DispellerCoA.CharKey()
+    return DispellerCoA.DefaultProfileName()
+end
+
+function DispellerCoA.SanitizeProfileName(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+    name = string.gsub(name, "^%s+", "")
+    name = string.gsub(name, "%s+$", "")
+    if name == "" then
+        return nil
+    end
+    if string.len(name) > 64 then
+        name = string.sub(name, 1, 64)
+    end
+    return name
+end
+
+function DispellerCoA.SanitizeProfile(db)
+    if not db then
+        return
+    end
+    if db.typeEnabled and db.typeEnabled.Bleed == nil then
+        db.typeEnabled.Bleed = true
+    end
+    if db.typeOrder then
+        local hasBleed = false
+        local i
+        for i = 1, #db.typeOrder do
+            if db.typeOrder[i] == "Bleed" then
+                hasBleed = true
+                break
+            end
+        end
+        if not hasBleed then
+            db.typeOrder[#db.typeOrder + 1] = "Bleed"
+        end
     end
     if not db.clickBinds then
         db.clickBinds = { "auto", "auto", "auto", "auto", "auto" }
@@ -63,6 +127,384 @@ function DispellerCoA.InitDB()
             end
         end
     end
+end
+
+function DispellerCoA.ProfileNames()
+    local names = {}
+    local name
+    local profiles = DispellerCoADB and DispellerCoADB.profiles
+    if profiles then
+        for name in pairs(profiles) do
+            names[#names + 1] = name
+        end
+        table.sort(names)
+    end
+    return names
+end
+
+function DispellerCoA.UniqueProfileName(base)
+    base = DispellerCoA.SanitizeProfileName(base) or "Default"
+    local profiles = DispellerCoADB.profiles
+    if not profiles or not profiles[base] then
+        return base
+    end
+    local i = 2
+    while profiles[base .. " " .. tostring(i)] do
+        i = i + 1
+    end
+    return base .. " " .. tostring(i)
+end
+
+function DispellerCoA.CharsUsingProfile(name)
+    local list = {}
+    local key, pname
+    local keys = DispellerCoADB and DispellerCoADB.profileKeys
+    if keys then
+        for key, pname in pairs(keys) do
+            if pname == name then
+                list[#list + 1] = key
+            end
+        end
+        table.sort(list)
+    end
+    return list
+end
+
+local function BindProfile(name)
+    local db = DispellerCoADB.profiles[name]
+    if not db then
+        return false
+    end
+    MergeDefaults(db, DispellerCoA.DefaultDB())
+    DispellerCoA.SanitizeProfile(db)
+    DispellerCoA.db = db
+    DispellerCoA.profileName = name
+    DispellerCoADB.profileKeys[DispellerCoA.charKey] = name
+    return true
+end
+
+local function ApplyProfile()
+    if DispellerCoA.DetectCures then
+        DispellerCoA.DetectCures()
+    end
+    if DispellerCoA.FullRefresh then
+        DispellerCoA.FullRefresh(false)
+    end
+end
+
+local function IsPrefixName(short, long)
+    if type(short) ~= "string" or type(long) ~= "string" then
+        return false
+    end
+    if string.len(short) >= string.len(long) then
+        return false
+    end
+    return string.sub(long, 1, string.len(short)) == short
+end
+
+local function RetargetProfile(oldName, newName)
+    if not oldName or not newName or oldName == newName then
+        return
+    end
+    newName = DispellerCoA.SanitizeProfileName(newName) or newName
+    if DispellerCoADB.profiles[oldName] and not DispellerCoADB.profiles[newName] then
+        DispellerCoADB.profiles[newName] = DispellerCoADB.profiles[oldName]
+        DispellerCoADB.profiles[oldName] = nil
+    end
+    local k, v
+    for k, v in pairs(DispellerCoADB.profileKeys) do
+        if v == oldName then
+            DispellerCoADB.profileKeys[k] = newName
+        end
+    end
+    local stillUsed = false
+    for k, v in pairs(DispellerCoADB.profileKeys) do
+        if v == oldName then
+            stillUsed = true
+            break
+        end
+    end
+    if not stillUsed then
+        DispellerCoADB.profiles[oldName] = nil
+    end
+end
+
+local function BareProfileName(name)
+    if type(name) ~= "string" then
+        return name
+    end
+    return string.gsub(name, " %d+$", "")
+end
+
+local function ShouldRepairName(current, wanted)
+    if type(current) ~= "string" or type(wanted) ~= "string" or current == wanted then
+        return false
+    end
+    if string.find(current, "Conquest of Azeroth", 1, true) then
+        return true
+    end
+    local bare = BareProfileName(current)
+    if IsPrefixName(bare, wanted) then
+        return true
+    end
+    local mashed = string.gsub(wanted, " %- ", "-")
+    if current == mashed or IsPrefixName(bare, mashed) then
+        return true
+    end
+    return false
+end
+
+function DispellerCoA.InitProfiles()
+    DispellerCoADB = DispellerCoADB or {}
+    DispellerCoADB.profiles = DispellerCoADB.profiles or {}
+    DispellerCoADB.profileKeys = DispellerCoADB.profileKeys or {}
+
+    local key = DispellerCoA.CharKey()
+    DispellerCoA.charKey = key
+
+    local player = UnitName("player") or "Player"
+    local realm = GetRealmName() or "Realm"
+    local oldKeys = {
+        realm .. "-" .. player,
+        realm .. " - " .. player,
+        DispellerCoA.ServerName() .. "-" .. player,
+    }
+    local oi
+    for oi = 1, #oldKeys do
+        local oldKey = oldKeys[oi]
+        if oldKey ~= key and DispellerCoADB.profileKeys[oldKey] then
+            if not DispellerCoADB.profileKeys[key] then
+                DispellerCoADB.profileKeys[key] = DispellerCoADB.profileKeys[oldKey]
+            end
+            DispellerCoADB.profileKeys[oldKey] = nil
+        end
+    end
+
+    if DispellerCoADB.char then
+        local charKey, data
+        for charKey, data in pairs(DispellerCoADB.char) do
+            if type(data) == "table" then
+                local name = DispellerCoA.UniqueProfileName(DispellerCoA.CleanProfileLabel(charKey))
+                DispellerCoADB.profiles[name] = data
+                DispellerCoADB.profileKeys[charKey] = name
+            elseif type(data) == "string" then
+                DispellerCoADB.profileKeys[charKey] = DispellerCoA.CleanProfileLabel(data)
+            end
+        end
+        DispellerCoADB.char = nil
+    end
+
+    local oldName, _
+    local toClean = {}
+    for oldName, _ in pairs(DispellerCoADB.profiles) do
+        if string.find(oldName, "Conquest of Azeroth", 1, true) then
+            toClean[#toClean + 1] = oldName
+        end
+    end
+    local ci
+    for ci = 1, #toClean do
+        oldName = toClean[ci]
+        local newName = DispellerCoA.CleanProfileLabel(oldName)
+        if newName ~= oldName then
+            RetargetProfile(oldName, newName)
+        end
+    end
+
+    local keyJobs = {}
+    local charKey, pname
+    for charKey, pname in pairs(DispellerCoADB.profileKeys) do
+        local cleaned = DispellerCoA.CleanProfileLabel(charKey)
+        if cleaned and cleaned ~= charKey then
+            keyJobs[#keyJobs + 1] = { old = charKey, new = cleaned, pname = pname }
+        end
+    end
+    local ki
+    for ki = 1, #keyJobs do
+        local job = keyJobs[ki]
+        if not DispellerCoADB.profileKeys[job.new] then
+            DispellerCoADB.profileKeys[job.new] = job.pname
+        end
+        if job.old ~= DispellerCoA.charKey then
+            DispellerCoADB.profileKeys[job.old] = nil
+        end
+    end
+
+    local nameJobs = {}
+    for charKey, pname in pairs(DispellerCoADB.profileKeys) do
+        local wantedName = DispellerCoA.CleanProfileLabel(charKey)
+        if ShouldRepairName(pname, wantedName) then
+            nameJobs[#nameJobs + 1] = { old = pname, new = wantedName }
+        end
+    end
+    local ni
+    for ni = 1, #nameJobs do
+        RetargetProfile(nameJobs[ni].old, nameJobs[ni].new)
+    end
+
+    local wanted = DispellerCoA.DefaultProfileName()
+    local name = DispellerCoADB.profileKeys[key]
+    if not name or not DispellerCoADB.profiles[name] then
+        name = wanted
+        if not DispellerCoADB.profiles[name] then
+            name = DispellerCoA.UniqueProfileName(wanted)
+            DispellerCoADB.profiles[name] = DispellerCoA.DefaultDB()
+        end
+        DispellerCoADB.profileKeys[key] = name
+    end
+
+    if name ~= wanted then
+        local auto = (name == player)
+            or (string.find(name, "Conquest of Azeroth", 1, true) ~= nil)
+            or (name == realm .. "-" .. player)
+            or (name == realm .. " - " .. player)
+            or (name == DispellerCoA.ServerName() .. "-" .. player)
+            or IsPrefixName(BareProfileName(name), wanted)
+        if auto then
+            RetargetProfile(name, wanted)
+            name = wanted
+        end
+    end
+
+    BindProfile(name)
+end
+
+function DispellerCoA.SelectProfile(name)
+    local L = DispellerCoA.L
+    if not BindProfile(name) then
+        Print(L.PROFILE_MISSING:format(tostring(name)))
+        return false
+    end
+    ApplyProfile()
+    Print(L.PROFILE_SELECTED:format(name))
+    return true
+end
+
+function DispellerCoA.NewProfile(name, copyCurrent)
+    local L = DispellerCoA.L
+    name = DispellerCoA.SanitizeProfileName(name)
+    if not name then
+        Print(L.PROFILE_NEED_NAME)
+        return false
+    end
+    if DispellerCoADB.profiles[name] then
+        Print(L.PROFILE_EXISTS:format(name))
+        return false
+    end
+    if copyCurrent and DispellerCoA.db then
+        DispellerCoADB.profiles[name] = CopyTable(DispellerCoA.db)
+    else
+        DispellerCoADB.profiles[name] = DispellerCoA.DefaultDB()
+    end
+    return DispellerCoA.SelectProfile(name)
+end
+
+function DispellerCoA.RenameProfile(newName, silent)
+    local L = DispellerCoA.L
+    local old = DispellerCoA.profileName
+    newName = DispellerCoA.SanitizeProfileName(newName)
+    if not newName then
+        Print(L.PROFILE_NEED_NAME)
+        return false
+    end
+    if not old or not DispellerCoADB.profiles[old] then
+        return false
+    end
+    if newName == old then
+        return true
+    end
+    if DispellerCoADB.profiles[newName] then
+        Print(L.PROFILE_EXISTS:format(newName))
+        return false
+    end
+    DispellerCoADB.profiles[newName] = DispellerCoADB.profiles[old]
+    DispellerCoADB.profiles[old] = nil
+    local k, v
+    for k, v in pairs(DispellerCoADB.profileKeys) do
+        if v == old then
+            DispellerCoADB.profileKeys[k] = newName
+        end
+    end
+    DispellerCoA.profileName = newName
+    if not silent then
+        Print(L.PROFILE_RENAMED:format(old, newName))
+    end
+    return true
+end
+
+function DispellerCoA.CopyProfileFrom(fromName)
+    local L = DispellerCoA.L
+    local dest = DispellerCoA.profileName
+    local src = DispellerCoADB.profiles[fromName]
+    if not dest or not src then
+        Print(L.PROFILE_MISSING:format(tostring(fromName)))
+        return false
+    end
+    if fromName == dest then
+        return true
+    end
+    DispellerCoADB.profiles[dest] = CopyTable(src)
+    BindProfile(dest)
+    ApplyProfile()
+    Print(L.PROFILE_COPIED:format(fromName, dest))
+    return true
+end
+
+function DispellerCoA.ResetProfile()
+    local L = DispellerCoA.L
+    local name = DispellerCoA.profileName
+    if not name then
+        return false
+    end
+    DispellerCoADB.profiles[name] = DispellerCoA.DefaultDB()
+    BindProfile(name)
+    ApplyProfile()
+    Print(L.PROFILE_RESET:format(name))
+    return true
+end
+
+function DispellerCoA.DeleteProfile(name)
+    local L = DispellerCoA.L
+    name = DispellerCoA.SanitizeProfileName(name) or name
+    if not name or not DispellerCoADB.profiles[name] then
+        Print(L.PROFILE_MISSING:format(tostring(name)))
+        return false
+    end
+    local names = DispellerCoA.ProfileNames()
+    if #names <= 1 then
+        Print(L.PROFILE_LAST)
+        return false
+    end
+    local fallback
+    local i
+    for i = 1, #names do
+        if names[i] ~= name then
+            fallback = names[i]
+            break
+        end
+    end
+    if not fallback then
+        Print(L.PROFILE_LAST)
+        return false
+    end
+    local switch = name == DispellerCoA.profileName
+    local k, v
+    for k, v in pairs(DispellerCoADB.profileKeys) do
+        if v == name then
+            DispellerCoADB.profileKeys[k] = fallback
+        end
+    end
+    DispellerCoADB.profiles[name] = nil
+    Print(L.PROFILE_DELETED:format(name))
+    if switch then
+        BindProfile(fallback)
+        ApplyProfile()
+        Print(L.PROFILE_SELECTED:format(fallback))
+    end
+    return true
+end
+
+function DispellerCoA.InitDB()
+    DispellerCoA.InitProfiles()
 end
 
 local function AfterScan(playSound)
@@ -381,6 +823,8 @@ SlashCmdList.DISPELLERCOA = function(msg)
         local result = DispellerCoA.ToggleList("skip", name)
         Print((result == "added" and L.ADDED_SKIP or L.REMOVED_SKIP):format(name))
         DispellerCoA.FullRefresh(false)
+    elseif cmd == "profiles" or cmd == "profile" then
+        DispellerCoA.OpenProfileOptions()
     else
         Print(L.USAGE)
     end

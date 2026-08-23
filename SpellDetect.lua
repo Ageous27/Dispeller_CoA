@@ -225,6 +225,13 @@ local enabledBuf = {}
 function DispellerCoA.EnabledCureTypes()
     local db = DispellerCoA.db
     local write = 0
+    if not db or not db.typeOrder then
+        local i
+        for i = #enabledBuf, 1, -1 do
+            enabledBuf[i] = nil
+        end
+        return enabledBuf
+    end
     local order = db.typeOrder
     local i
     for i = 1, #order do

@@ -178,6 +178,7 @@ function DispellerCoA.CreateOptions()
     InterfaceOptions_AddCategory(panel)
     DispellerCoA.optionsPanel = panel
     DispellerCoA.CreateClickOptions(panel)
+    DispellerCoA.CreateProfileOptions(panel)
 end
 
 local CLICK_LABELS = {
@@ -346,6 +347,243 @@ function DispellerCoA.CreateClickOptions(parentPanel)
 
     InterfaceOptions_AddCategory(child)
     DispellerCoA.clickOptionsPanel = child
+end
+
+local pendingDelete
+local pendingReset
+
+function DispellerCoA.CreateProfileOptions(parentPanel)
+    local L = DispellerCoA.L
+    local child = CreateFrame("Frame", "DispellerCoAProfileOptions", UIParent)
+    child.name = L.PROFILES
+    child.parent = parentPanel.name
+    child:Hide()
+
+    local title = child:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText(L.PROFILES)
+
+    local help = child:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    help:SetPoint("TOPLEFT", 16, -40)
+    help:SetPoint("RIGHT", child, "RIGHT", -16, 0)
+    help:SetJustifyH("LEFT")
+    help:SetText(L.PROFILES_HELP)
+
+    local function SizeDropDown(dd, width)
+        UIDropDownMenu_SetWidth(dd, width)
+        UIDropDownMenu_JustifyText(dd, "LEFT")
+        local text = _G[dd:GetName() .. "Text"]
+        if text then
+            text:SetWidth(width)
+            text:SetJustifyH("LEFT")
+        end
+    end
+
+    local currentLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    currentLabel:SetPoint("TOPLEFT", 16, -72)
+    currentLabel:SetText(L.PROFILE_CURRENT_LABEL)
+
+    local currentDD = CreateFrame("Frame", "DispellerCoAProfileCurrentDD", child, "UIDropDownMenuTemplate")
+    currentDD:SetPoint("TOPLEFT", 0, -88)
+    SizeDropDown(currentDD, 360)
+
+    local nameLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    nameLabel:SetPoint("TOPLEFT", 16, -128)
+    nameLabel:SetText(L.PROFILE_NAME)
+
+    local nameBox = CreateFrame("EditBox", NextName("EB"), child, "InputBoxTemplate")
+    nameBox:SetPoint("TOPLEFT", 24, -148)
+    nameBox:SetWidth(360)
+    nameBox:SetHeight(20)
+    nameBox:SetAutoFocus(false)
+    nameBox:SetMaxLetters(64)
+    nameBox:SetFontObject(ChatFontNormal)
+
+    local function MakeBtn(text, width, x, y, onClick)
+        local btn = CreateFrame("Button", NextName("Btn"), child, "UIPanelButtonTemplate")
+        btn:SetWidth(width)
+        btn:SetHeight(22)
+        btn:SetPoint("TOPLEFT", x, y)
+        btn:SetText(text)
+        btn:SetScript("OnClick", onClick)
+        return btn
+    end
+
+    MakeBtn(L.PROFILE_NEW, 70, 16, -184, function()
+        DispellerCoA.NewProfile(nameBox:GetText(), true)
+        child.refresh()
+    end)
+    MakeBtn(L.PROFILE_RENAME, 80, 94, -184, function()
+        DispellerCoA.RenameProfile(nameBox:GetText())
+        child.refresh()
+    end)
+    MakeBtn(L.PROFILE_RESET_BTN, 70, 182, -184, function()
+        pendingReset = DispellerCoA.profileName
+        StaticPopup_Show("DISPELLERCOA_RESET_PROFILE", pendingReset)
+    end)
+
+    local copyLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    copyLabel:SetPoint("TOPLEFT", 16, -224)
+    copyLabel:SetText(L.PROFILE_COPY_FROM)
+
+    local copyDD = CreateFrame("Frame", "DispellerCoAProfileCopyDD", child, "UIDropDownMenuTemplate")
+    copyDD:SetPoint("TOPLEFT", 0, -240)
+    SizeDropDown(copyDD, 280)
+    copyDD.selected = nil
+
+    MakeBtn(L.PROFILE_COPY, 70, 16, -280, function()
+        if copyDD.selected then
+            DispellerCoA.CopyProfileFrom(copyDD.selected)
+            child.refresh()
+        end
+    end)
+
+    MakeBtn(L.PROFILE_DELETE, 80, 94, -280, function()
+        local name = nameBox:GetText()
+        name = DispellerCoA.SanitizeProfileName(name)
+        if not name then
+            name = DispellerCoA.profileName
+        end
+        pendingDelete = name
+        StaticPopup_Show("DISPELLERCOA_DELETE_PROFILE", pendingDelete)
+    end)
+
+    local usedLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    usedLabel:SetPoint("TOPLEFT", 16, -320)
+    usedLabel:SetText(L.PROFILE_USED_BY)
+
+    local usedFS = child:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    usedFS:SetPoint("TOPLEFT", 16, -340)
+    usedFS:SetPoint("RIGHT", child, "RIGHT", -16, 0)
+    usedFS:SetJustifyH("LEFT")
+
+    local function InitCurrentMenu()
+        local names = DispellerCoA.ProfileNames()
+        local i
+        for i = 1, #names do
+            local info = UIDropDownMenu_CreateInfo()
+            local name = names[i]
+            info.text = name
+            info.value = name
+            info.func = function()
+                DispellerCoA.SelectProfile(name)
+                child.refresh()
+            end
+            info.checked = DispellerCoA.profileName == name
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+
+    local function InitCopyMenu()
+        local names = DispellerCoA.ProfileNames()
+        local i
+        local any = false
+        for i = 1, #names do
+            local name = names[i]
+            if name ~= DispellerCoA.profileName then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = name
+                info.value = name
+                info.func = function()
+                    copyDD.selected = name
+                    UIDropDownMenu_SetText(copyDD, name)
+                end
+                info.checked = copyDD.selected == name
+                UIDropDownMenu_AddButton(info)
+                any = true
+            end
+        end
+        if not any then
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = L.PROFILE_NONE_OTHER
+            info.disabled = true
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+
+    currentDD.rebuild = InitCurrentMenu
+    copyDD.rebuild = InitCopyMenu
+    UIDropDownMenu_Initialize(currentDD, InitCurrentMenu)
+    UIDropDownMenu_Initialize(copyDD, InitCopyMenu)
+
+    function child.refresh()
+        UIDropDownMenu_Initialize(currentDD, currentDD.rebuild)
+        UIDropDownMenu_SetText(currentDD, DispellerCoA.profileName or "")
+        SizeDropDown(currentDD, 360)
+        nameBox:SetText(DispellerCoA.profileName or "")
+        if copyDD.selected == DispellerCoA.profileName then
+            copyDD.selected = nil
+        end
+        UIDropDownMenu_Initialize(copyDD, copyDD.rebuild)
+        UIDropDownMenu_SetText(copyDD, copyDD.selected or "")
+        SizeDropDown(copyDD, 280)
+        local users = DispellerCoA.CharsUsingProfile(DispellerCoA.profileName)
+        if #users == 0 then
+            usedFS:SetText(L.PROFILE_NONE_OTHER)
+        else
+            local lines = {}
+            local i
+            for i = 1, #users do
+                local extra = ""
+                if users[i] == DispellerCoA.charKey then
+                    extra = L.PROFILE_THIS
+                end
+                lines[i] = "  " .. users[i] .. extra
+            end
+            usedFS:SetText(table.concat(lines, "\n"))
+        end
+    end
+
+    child:SetScript("OnShow", child.refresh)
+
+    if not StaticPopupDialogs["DISPELLERCOA_DELETE_PROFILE"] then
+        StaticPopupDialogs["DISPELLERCOA_DELETE_PROFILE"] = {
+            text = L.PROFILE_DELETE_CONFIRM,
+            button1 = YES,
+            button2 = NO,
+            OnAccept = function()
+                if pendingDelete then
+                    DispellerCoA.DeleteProfile(pendingDelete)
+                    pendingDelete = nil
+                    if DispellerCoA.profileOptionsPanel and DispellerCoA.profileOptionsPanel.refresh then
+                        DispellerCoA.profileOptionsPanel.refresh()
+                    end
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+        }
+    end
+    if not StaticPopupDialogs["DISPELLERCOA_RESET_PROFILE"] then
+        StaticPopupDialogs["DISPELLERCOA_RESET_PROFILE"] = {
+            text = L.PROFILE_RESET_CONFIRM,
+            button1 = YES,
+            button2 = NO,
+            OnAccept = function()
+                DispellerCoA.ResetProfile()
+                if DispellerCoA.profileOptionsPanel and DispellerCoA.profileOptionsPanel.refresh then
+                    DispellerCoA.profileOptionsPanel.refresh()
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+        }
+    end
+
+    InterfaceOptions_AddCategory(child)
+    DispellerCoA.profileOptionsPanel = child
+end
+
+function DispellerCoA.OpenProfileOptions()
+    local panel = DispellerCoA.profileOptionsPanel
+    if panel then
+        InterfaceOptionsFrame_OpenToCategory(panel)
+        InterfaceOptionsFrame_OpenToCategory(panel)
+    else
+        DispellerCoA.OpenOptions()
+    end
 end
 
 function DispellerCoA.OpenOptions()
