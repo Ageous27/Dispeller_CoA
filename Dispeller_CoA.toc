@@ -1,0 +1,20 @@
+## Interface: 30300
+## Title: Dispeller_CoA
+## Notes: Party and raid dispel grid for Conquest of Azeroth. Magic, poison, disease, and curse.
+## Author: Greg
+## Version: 1.0.0
+## SavedVariables: DispellerCoADB
+
+Locale\enUS.lua
+Constants.lua
+SpellCatalog.lua
+SpellDetect.lua
+Roster.lua
+Lists.lua
+Blacklist.lua
+DebuffScan.lua
+UI\MicroFrames.xml
+UI\MicroFrames.lua
+UI\LiveList.lua
+UI\Options.lua
+Core.lua
