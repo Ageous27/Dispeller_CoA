@@ -33,8 +33,15 @@ local function TooltipSaysBleed(unit, index)
         bleedTip = CreateFrame("GameTooltip", "DispellerCoABleedTip", nil, "GameTooltipTemplate")
         bleedTip:SetOwner(UIParent, "ANCHOR_NONE")
     end
+    bleedTip:SetOwner(UIParent, "ANCHOR_NONE")
     bleedTip:ClearLines()
-    bleedTip:SetUnitDebuff(unit, index)
+    DispellerCoA.BlankTooltipLines(bleedTip)
+    DispellerCoA.PatchTooltipGetText(bleedTip)
+    local oldEH = geterrorhandler()
+    seterrorhandler(function() end)
+    pcall(bleedTip.SetUnitDebuff, bleedTip, unit, index)
+    seterrorhandler(oldEH)
+    DispellerCoA.PatchTooltipGetText(bleedTip)
     local i
     for i = 1, bleedTip:NumLines() do
         local fs = _G["DispellerCoABleedTipTextLeft" .. i]

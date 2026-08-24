@@ -21,6 +21,52 @@ local TYPE_WORD = {
 
 local tooltipCache = {}
 local tip
+local patchedGetText = {}
+
+-- Ascension GameTooltipMods indexes line:GetText() with no nil check.
+function DispellerCoA.BlankTooltipLines(t)
+    local name = t and t:GetName()
+    if not name then
+        return
+    end
+    local i
+    for i = 1, 40 do
+        local left = _G[name .. "TextLeft" .. i]
+        local right = _G[name .. "TextRight" .. i]
+        if not left and not right then
+            break
+        end
+        if left then
+            left:SetText("")
+        end
+        if right then
+            right:SetText("")
+        end
+    end
+end
+
+local function NilSafeGetText(fs)
+    if not fs or patchedGetText[fs] then
+        return
+    end
+    patchedGetText[fs] = true
+    local orig = fs.GetText
+    fs.GetText = function(self)
+        return orig(self) or ""
+    end
+end
+
+function DispellerCoA.PatchTooltipGetText(t)
+    local name = t and t:GetName()
+    if not name then
+        return
+    end
+    local i
+    for i = 1, 40 do
+        NilSafeGetText(_G[name .. "TextLeft" .. i])
+        NilSafeGetText(_G[name .. "TextRight" .. i])
+    end
+end
 
 local function EnsureTip()
     if tip then
@@ -28,7 +74,44 @@ local function EnsureTip()
     end
     tip = CreateFrame("GameTooltip", "DispellerCoAScanTip", nil, "GameTooltipTemplate")
     tip:SetOwner(UIParent, "ANCHOR_NONE")
+    DispellerCoA.PatchTooltipGetText(tip)
     return tip
+end
+
+local function SafeSpellDescription(id)
+    if not id then
+        return nil
+    end
+    local ok, desc
+    if C_Spell and C_Spell.GetSpellDescription then
+        ok, desc = pcall(C_Spell.GetSpellDescription, id)
+        if ok and type(desc) == "string" and desc ~= "" then
+            return desc
+        end
+    end
+    if GetSpellDescription then
+        ok, desc = pcall(GetSpellDescription, id)
+        if ok and type(desc) == "string" and desc ~= "" then
+            return desc
+        end
+    end
+    return nil
+end
+
+local function NameLooksCleanse(name)
+    if not name then
+        return false
+    end
+    local n = name:lower()
+    return n:find("dispel", 1, true)
+        or n:find("cleanse", 1, true)
+        or n:find("purif", 1, true)
+        or n:find("cure", 1, true)
+        or n:find("abolish", 1, true)
+        or n:find("stoneform", 1, true)
+        or n:find("rebuke", 1, true)
+        or n:find("remove", 1, true)
+        or n:find("purge", 1, true)
 end
 
 local tipParts = {}
@@ -41,7 +124,7 @@ local function TooltipText()
     for i = 1, n do
         local fs = _G["DispellerCoAScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
-        if text then
+        if text and text ~= "" then
             used = used + 1
             tipParts[used] = text
         end
@@ -52,17 +135,40 @@ local function TooltipText()
     return table.concat(tipParts, "\n"):lower()
 end
 
-local function ParseTooltip(slot, name)
-    local cacheKey = name or slot
+-- SetSpell on a hidden GameTooltip trips Ascension GameTooltipMods (nil lineText).
+-- Prefer GetSpellDescription; only SetSpell for names that look like cleanses.
+local function ScanTooltipText(slot)
+    local t = EnsureTip()
+    t:SetOwner(UIParent, "ANCHOR_NONE")
+    t:ClearLines()
+    DispellerCoA.BlankTooltipLines(t)
+    DispellerCoA.PatchTooltipGetText(t)
+    local oldEH = geterrorhandler()
+    seterrorhandler(function() end)
+    pcall(t.SetSpell, t, slot, BOOKTYPE_SPELL)
+    seterrorhandler(oldEH)
+    DispellerCoA.PatchTooltipGetText(t)
+    return TooltipText()
+end
+
+local function ParseTooltip(slot, name, id)
+    local cacheKey = id or name or slot
     local cached = tooltipCache[cacheKey]
     if cached ~= nil then
         return cached ~= false and cached or false
     end
-    local t = EnsureTip()
-    t:ClearLines()
-    t:SetSpell(slot, BOOKTYPE_SPELL)
-    local text = TooltipText()
-    if text == "" then
+    local text
+    local desc = SafeSpellDescription(id)
+    if desc then
+        text = desc:lower()
+    elseif NameLooksCleanse(name) then
+        text = ScanTooltipText(slot)
+    else
+        tooltipCache[cacheKey] = false
+        return false
+    end
+    if not text or text == "" then
+        tooltipCache[cacheKey] = false
         return false
     end
 
@@ -156,7 +262,7 @@ function DispellerCoA.DetectCures()
                 local cat = (id and DispellerCoA.CatalogById[id]) or DispellerCoA.CatalogByName[name]
                 local parsed = cat
                 if not parsed then
-                    parsed = ParseTooltip(slot, name)
+                    parsed = ParseTooltip(slot, name, id)
                 end
                 if parsed and parsed.types then
                     known[#known + 1] = {

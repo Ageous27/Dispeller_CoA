@@ -2,7 +2,7 @@
 ## Title: Dispeller_CoA
 ## Notes: Party and raid dispel grid for Conquest of Azeroth. Magic, poison, disease, and curse.
 ## Author: Greg
-## Version: 1.1.0
+## Version: 1.1.1
 ## SavedVariables: DispellerCoADB
 
 Locale\enUS.lua
